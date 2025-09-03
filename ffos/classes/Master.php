@@ -1,0 +1,310 @@
+<?php
+require_once('../config.php');
+Class Master extends DBConnection {
+	private $settings;
+	public function __construct(){
+		global $_settings;
+		$this->settings = $_settings;
+		parent::__construct();
+	}
+	public function __destruct(){
+		parent::__destruct();
+	}
+	function capture_err(){
+		if(!$this->conn->error)
+			return false;
+		else{
+			$resp['status'] = 'failed';
+			$resp['error'] = $this->conn->error;
+			return json_encode($resp);
+			exit;
+		}
+	}
+	function delete_img(){
+		extract($_POST);
+		if(is_file($path)){
+			if(unlink($path)){
+				$resp['status'] = 'success';
+			}else{
+				$resp['status'] = 'failed';
+				$resp['error'] = 'failed to delete '.$path;
+			}
+		}else{
+			$resp['status'] = 'failed';
+			$resp['error'] = 'Unkown '.$path.' path';
+		}
+		return json_encode($resp);
+	}
+	function save_category(){
+		extract($_POST);
+		$data = "";
+		foreach($_POST as $k =>$v){
+			if(!in_array($k,array('id'))){
+				if(!empty($data)) $data .=",";
+				$v = htmlspecialchars($this->conn->real_escape_string($v));
+				$data .= " `{$k}`='{$v}' ";
+			}
+		}
+		$check = $this->conn->query("SELECT * FROM `category_list` where `name` = '{$name}' and delete_flag = 0 ".(!empty($id) ? " and id != {$id} " : "")." ")->num_rows;
+		if($this->capture_err())
+			return $this->capture_err();
+		if($check > 0){
+			$resp['status'] = 'failed';
+			$resp['msg'] = "Category already exists.";
+			return json_encode($resp);
+			exit;
+		}
+		if(empty($id)){
+			$sql = "INSERT INTO `category_list` set {$data} ";
+		}else{
+			$sql = "UPDATE `category_list` set {$data} where id = '{$id}' ";
+		}
+			$save = $this->conn->query($sql);
+		if($save){
+			$cid = !empty($id) ? $id : $this->conn->insert_id;
+			$resp['cid'] = $cid;
+			$resp['status'] = 'success';
+			if(empty($id))
+				$resp['msg'] = "New Category successfully saved.";
+			else
+				$resp['msg'] = " Category successfully updated.";
+		}else{
+			$resp['status'] = 'failed';
+			$resp['err'] = $this->conn->error."[{$sql}]";
+		}
+		// if($resp['status'] == 'success')
+		// 	$this->settings->set_flashdata('success',$resp['msg']);
+			return json_encode($resp);
+	}
+	function delete_category(){
+		extract($_POST);
+		$del = $this->conn->query("UPDATE `category_list` set `delete_flag` = 1 where id = '{$id}'");
+		if($del){
+			$resp['status'] = 'success';
+			$this->settings->set_flashdata('success'," Category successfully deleted.");
+		}else{
+			$resp['status'] = 'failed';
+			$resp['error'] = $this->conn->error;
+		}
+		return json_encode($resp);
+
+	}
+	function save_menu(){
+		extract($_POST);
+		$data = "";
+
+		// Handle image upload
+		if(isset($_FILES['img']) && $_FILES['img']['tmp_name'] != ''){
+			$ext = pathinfo($_FILES['img']['name'], PATHINFO_EXTENSION);
+			$fname = $code . '.' . $ext;
+			$upload_path = '../uploads/menus/';
+			
+			// Create directory if it doesn't exist
+			if(!is_dir($upload_path))
+				mkdir($upload_path, 0777, true);
+			
+			// If updating, delete old image if it exists
+			if(!empty($id)){
+				// Check for all possible extensions
+				$extensions = ['jpg', 'jpeg', 'png'];
+				foreach($extensions as $extension) {
+					$old_file = $upload_path . $code . '.' . $extension;
+					if(is_file($old_file)){
+						unlink($old_file);
+					}
+				}
+			}
+			
+			// Upload new image
+			if(move_uploaded_file($_FILES['img']['tmp_name'], $upload_path . $fname)){
+				$data .= " `image`='uploads/menus/{$fname}' ";
+			}
+		}
+
+		foreach($_POST as $k =>$v){
+			if(!in_array($k,array('id'))){
+				if(!empty($data)) $data .=",";
+				$v = htmlspecialchars($this->conn->real_escape_string($v));
+				$data .= " `{$k}`='{$v}' ";
+			}
+		}
+		$check = $this->conn->query("SELECT * FROM `menu_list` where `code` = '{$code}' and delete_flag = 0 ".(!empty($id) ? " and id != {$id} " : "")." ")->num_rows;
+		if($this->capture_err())
+			return $this->capture_err();
+		if($check > 0){
+			$resp['status'] = 'failed';
+			$resp['msg'] = "Menu Code already exists.";
+			return json_encode($resp);
+			exit;
+		}
+		if(empty($id)){
+			$sql = "INSERT INTO `menu_list` set {$data} ";
+		}else{
+			$sql = "UPDATE `menu_list` set {$data} where id = '{$id}' ";
+		}
+			$save = $this->conn->query($sql);
+		if($save){
+			$iid = !empty($id) ? $id : $this->conn->insert_id;
+			$resp['iid'] = $iid;
+			$resp['status'] = 'success';
+			if(empty($id))
+				$resp['msg'] = "New Menu successfully saved.";
+			else
+				$resp['msg'] = " Menu successfully updated.";
+		}else{
+			$resp['status'] = 'failed';
+			$resp['err'] = $this->conn->error."[{$sql}]";
+		}
+		// if($resp['status'] == 'success')
+		// 	$this->settings->set_flashdata('success',$resp['msg']);
+			return json_encode($resp);
+	}
+	function delete_menu(){
+		extract($_POST);
+		$del = $this->conn->query("UPDATE `menu_list` set `delete_flag` = 1 where id = '{$id}'");
+		if($del){
+			$resp['status'] = 'success';
+			$this->settings->set_flashdata('success'," Menu successfully deleted.");
+		}else{
+			$resp['status'] = 'failed';
+			$resp['error'] = $this->conn->error;
+		}
+		return json_encode($resp);
+
+	}
+	function place_order(){
+		$prefix = date("Ymd");
+		$code = sprintf("%'.05d", 1);
+		while(true){
+			$check = $this->conn->query("SELECT * FROM `order_list` where code = '{$prefix}{$code}'")->num_rows;
+			if($check > 0){
+				$code = sprintf("%'.05d",abs($code)+ 1);
+			}else{
+				$_POST['code'] = $prefix.$code;
+				$_POST['queue'] = $code;
+				break;
+			}
+		}
+		$_POST['user_id'] = $this->settings->userdata('id');
+		extract($_POST);
+		$order_fields = ['code', 'queue', 'total_amount', 'tendered_amount', 'user_id'];
+		$data = "";
+		foreach($_POST as $k=> $v){
+			if(in_array($k, $order_fields) && !is_array($_POST[$k])){
+				$v = addslashes(htmlspecialchars($this->conn->real_escape_string($v)));
+				if(!empty($data)) $data .= ", ";
+				$data .= " `{$k}` = '{$v}' ";
+			}
+		}
+		$sql = "INSERT INTO `order_list` set {$data}";
+		$save = $this->conn->query($sql);
+		if($save){
+			$oid = $this->conn->insert_id;
+			$resp['oid'] = $oid;
+			$data = '';
+			foreach($menu_id as $k=>$v){
+				if(!empty($data)) $data .= ", ";
+				$data .= "('{$oid}', '{$menu_id[$k]}', '{$price[$k]}', '{$quantity[$k]}')";
+			}
+			$sql2 = "INSERT INTO `order_items` (`order_id`, `menu_id`, `price`, `quantity`) VALUES {$data}";
+			$save2 = $this->conn->query($sql2);
+			if($save2){
+				$resp['status'] = 'success';
+				$resp['msg'] = ' Order has been placed.';
+			}else{
+				$resp['status'] = 'failed';
+				$resp['msg'] = "Order has failed to save due to some reason.";
+				$resp['err'] = $this->conn->error;
+				$resp['sql'] = $sql2;
+				$this->conn->query("DELETE FROM `order_list` where id = '{$oid}'");
+			}
+		}else{
+			$resp['status'] = 'failed';
+			$resp['msg'] = "Order has failed to save due to some reason.";
+			$resp['err'] = $this->conn->error;
+			$resp['sql'] = $sql;
+		}
+		return json_encode($resp);
+	}
+	function delete_order(){
+		extract($_POST);
+		$del = $this->conn->query("DELETE FROM `order_list` where id = '{$id}'");
+		if($del){
+			$resp['status'] = 'success';
+			$this->settings->set_flashdata('success'," Order has been deleted successfully.");
+		}else{
+			$resp['status'] = 'failed';
+			$resp['error'] = $this->conn->error;
+		}
+		return json_encode($resp);
+
+	}
+	function get_order(){
+		extract($_POST);
+		$swhere = "";
+		if(isset($listed) && count($listed) > 0){
+			$swhere = " and id not in (".implode(",",$listed).")";
+		}
+		$orders = $this->conn->query("SELECT id, `queue` FROM `order_list` where `status` = 0 {$swhere} order by abs(unix_timestamp(date_created)) asc limit 10");
+		$data=[];
+		while($row = $orders->fetch_assoc()){
+			$items = $this->conn->query("SELECT oi.*, concat(m.code, m.name) as `item` FROM `order_items` oi inner join menu_list m on oi.menu_id = m.id where order_id = '{$row['id']}'");
+			$item_arr = [];
+			while($irow = $items->fetch_assoc()){
+				$item_arr[] = $irow;
+			}
+			$row['item_arr'] = $item_arr;
+			$data[] = $row;
+		}
+		$resp['status'] = 'success';
+		$resp['data'] = $data;
+		return json_encode($resp);
+	}
+	function serve_order(){
+		extract($_POST);
+		$update = $this->conn->query("UPDATE `order_list` set `status` = 1 where id = '{$id}'");
+		if($update){
+			$resp['status'] = 'success';
+		}else{
+			$resp['status'] = 'failed';
+			$resp['error'] = $this->conn->error;
+		}
+		return json_encode($resp);
+	}
+}
+
+$Master = new Master();
+$action = !isset($_GET['f']) ? 'none' : strtolower($_GET['f']);
+$sysset = new SystemSettings();
+switch ($action) {
+	case 'delete_img':
+		echo $Master->delete_img();
+	break;
+	case 'save_category':
+		echo $Master->save_category();
+	break;
+	case 'delete_category':
+		echo $Master->delete_category();
+	break;
+	case 'save_menu':
+		echo $Master->save_menu();
+	break;
+	case 'delete_menu':
+		echo $Master->delete_menu();
+	break;
+	case 'place_order':
+		echo $Master->place_order();
+	break;
+	case 'delete_order':
+		echo $Master->delete_order();
+	break;
+	case 'get_order':
+		echo $Master->get_order();
+	break;
+	case 'serve_order':
+		echo $Master->serve_order();
+	break;
+	default:
+		// echo $sysset->index();
+		break;
+}
