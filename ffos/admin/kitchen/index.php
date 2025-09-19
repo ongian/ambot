@@ -64,53 +64,115 @@
 </div>
 </noscript>
 <script>
+    var isLoading = false;
+    var currentOrders = new Set();
+    var pollingInterval = null;
+
     function get_order(){
+        // Prevent multiple simultaneous requests
+        if(isLoading) return;
+        
+        isLoading = true;
         listed = []
         $('.order-item').each(function(){
             listed.push($(this).attr('data-id'))
         })
+        
         $.ajax({
             url:_base_url_+"classes/Master.php?f=get_order",
             method:'POST',
             data:{listed : listed},
             dataType:'json',
+            timeout: 10000, // 10 second timeout
             error:err=>{
                 console.log(err)
                 alert_toast("An error occurred", "error")
+                isLoading = false;
             },
             success:function(resp){
+                isLoading = false;
                 if(resp.status == 'success'){
+                    // Track new orders to prevent duplicates
+                    var newOrderIds = Object.keys(resp.data).map(k => resp.data[k].id);
+                    
                     Object.keys(resp.data).map(k=>{
-                        console.log('resp',resp)
                         var data = resp.data[k]
-                        console.log('data',data)
-                        var card = $($('noscript#order-clone').html()).clone()
-                        card.attr('data-id',data.id)
-                        card.find('.card-title').text('Queue #' + data.queue)
-                        Object.keys(data.item_arr).map(i=>{
-                            var row = card.find('.order-list-header').clone().removeClass('order-list-header bg-gradient-warning')
-                            row.find('div').first().text(data.item_arr[i].item)
-                            row.find('div').last().text(parseInt(data.item_arr[i].quantity).toLocaleString())
-                            card.find('.order-body').append(row)
-                        })
-                            console.log(data)
-                        $('#order-field').append(card)
-                        card.find('.order-served').click(function(){
-                            _conf("Are you sure to serve <b>Queue #: "+data.queue+"</b>?",'serve_order', [data.id])
-                        })
+                        
+                        // Only add if order doesn't already exist
+                        if(!currentOrders.has(data.id) && !$('.order-item[data-id="'+data.id+'"]').length){
+                            currentOrders.add(data.id);
+                            
+                            var card = $($('noscript#order-clone').html()).clone()
+                            card.attr('data-id',data.id)
+                            card.addClass('order-item') // Ensure class is added
+                            card.find('.card-title').text('Queue #' + data.queue)
+                            
+                            Object.keys(data.item_arr).map(i=>{
+                                var row = card.find('.order-list-header').clone().removeClass('order-list-header bg-gradient-warning')
+                                row.find('div').first().text(data.item_arr[i].item)
+                                row.find('div').last().text(parseInt(data.item_arr[i].quantity).toLocaleString())
+                                card.find('.order-body').append(row)
+                            })
+                            
+                            $('#order-field').append(card)
+                            
+                            // Use event delegation to prevent multiple event handlers
+                            card.find('.order-served').off('click').on('click', function(){
+                                _conf("Are you sure to serve <b>Queue #: "+data.queue+"</b>?",'serve_order', [data.id])
+                            })
+                        }
                     })
                 }
             }
         })
     }
+    
+    function startPolling(){
+        if(pollingInterval) {
+            clearInterval(pollingInterval);
+        }
+        pollingInterval = setInterval(() => {
+            get_order()
+        }, 3000); // Increased to 3 seconds to reduce server load
+    }
+    
+    function stopPolling(){
+        if(pollingInterval) {
+            clearInterval(pollingInterval);
+            pollingInterval = null;
+        }
+    }
+    
     $(function(){
         $('body').addClass('sidebar-collapse')
-        var load_data = setInterval(() => {
-            get_order()
-        }, 500);
+        
+        // Initial load
+        get_order();
+        
+        // Start polling
+        startPolling();
+        
+        // Stop polling when page is about to unload
+        $(window).on('beforeunload', function(){
+            stopPolling();
+        });
+        
+        // Pause polling when tab is not visible
+        document.addEventListener('visibilitychange', function() {
+            if (document.hidden) {
+                stopPolling();
+            } else {
+                startPolling();
+            }
+        });
     })
+    
     function serve_order($id){
         start_loader();
+        
+        // Remove from tracking set
+        currentOrders.delete($id);
+        
 		$.ajax({
 			url:_base_url_+"classes/Master.php?f=serve_order",
 			method:"POST",
@@ -128,6 +190,8 @@
 					$('.order-item[data-id="'+$id+'"]').remove()
 				}else{
 					alert_toast("An error occured.",'error');
+					// Re-add to tracking if removal failed
+					currentOrders.add($id);
 				}
 					end_loader();
 			}
